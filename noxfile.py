@@ -1,7 +1,8 @@
 import nox
 
-
 nox.options.sessions = ["lint", "tests", "tests_packaging"]
+
+PYTHON_VERISONS = ["2.7", "3.5", "3.6", "3.7", "3.8", "3.9", "3.10", "3.11"]
 
 
 @nox.session(reuse_venv=True)
@@ -13,13 +14,14 @@ def lint(session: nox.Session) -> None:
     session.run("pre-commit", "run", "-a")
 
 
-@nox.session
+@nox.session(python=PYTHON_VERISONS)
 def tests(session: nox.Session) -> None:
     """
     Run the tests (requires a compiler).
     """
     tmpdir = session.create_tmp()
-    session.install("pytest", "cmake")
+    session.install("cmake")
+    session.install("-r", "tests/requirements.txt")
     session.run(
         "cmake",
         "-S",

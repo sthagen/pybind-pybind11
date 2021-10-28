@@ -82,7 +82,7 @@ public:
         return caster_t::cast(&src.get(), policy, parent);
     }
     template <typename T> using cast_op_type = std::reference_wrapper<type>;
-    operator std::reference_wrapper<type>() { return cast_op<type &>(subcaster); }
+    explicit operator std::reference_wrapper<type>() { return cast_op<type &>(subcaster); }
 };
 
 #define PYBIND11_TYPE_CASTER(type, py_name)                                                       \
@@ -102,9 +102,9 @@ public:                                                                         
         }                                                                                         \
         return cast(*src, policy, parent);                                                        \
     }                                                                                             \
-    operator type *() { return &value; }                                                          \
-    operator type &() { return value; }                                                           \
-    operator type &&() && { return std::move(value); }                                            \
+    operator type *() { return &value; }               /* NOLINT(bugprone-macro-parentheses) */   \
+    operator type &() { return value; }                /* NOLINT(bugprone-macro-parentheses) */   \
+    operator type &&() && { return std::move(value); } /* NOLINT(bugprone-macro-parentheses) */   \
     template <typename T_>                                                                        \
     using cast_op_type = pybind11::detail::movable_cast_op_type<T_>
 
@@ -145,9 +145,8 @@ public:
                 py_value = (py_type) PyFloat_AsDouble(src.ptr());
             else
                 return false;
-        } else if (PyFloat_Check(src.ptr())) {
-            return false;
-        } else if (!convert && !PYBIND11_LONG_CHECK(src.ptr()) && !index_check(src.ptr())) {
+        } else if (PyFloat_Check(src.ptr())
+                   || (!convert && !PYBIND11_LONG_CHECK(src.ptr()) && !index_check(src.ptr()))) {
             return false;
         } else {
             handle src_or_index = src;
@@ -280,7 +279,7 @@ public:
     }
 
     template <typename T> using cast_op_type = void*&;
-    operator void *&() { return value; }
+    explicit operator void *&() { return value; }
     static constexpr auto name = _("capsule");
 private:
     void *value = nullptr;
@@ -377,6 +376,22 @@ template <typename StringType, bool IsView = false> struct string_caster {
             load_src = temp;
 #endif
         }
+
+#if PY_VERSION_HEX >= 0x03030000
+        // On Python >= 3.3, for UTF-8 we avoid the need for a temporary `bytes`
+        // object by using `PyUnicode_AsUTF8AndSize`.
+        if (PYBIND11_SILENCE_MSVC_C4127(UTF_N == 8)) {
+            Py_ssize_t size = -1;
+            const auto *buffer
+                = reinterpret_cast<const CharT *>(PyUnicode_AsUTF8AndSize(load_src.ptr(), &size));
+            if (!buffer) {
+                PyErr_Clear();
+                return false;
+            }
+            value = StringType(buffer, static_cast<size_t>(size));
+            return true;
+        }
+#endif
 
         auto utfNbytes = reinterpret_steal<object>(PyUnicode_AsEncodedString(
             load_src.ptr(), UTF_N == 8 ? "utf-8" : UTF_N == 16 ? "utf-16" : "utf-32", nullptr));
@@ -488,8 +503,10 @@ public:
         return StringCaster::cast(StringType(1, src), policy, parent);
     }
 
-    operator CharT*() { return none ? nullptr : const_cast<CharT *>(static_cast<StringType &>(str_caster).c_str()); }
-    operator CharT&() {
+    explicit operator CharT *() {
+        return none ? nullptr : const_cast<CharT *>(static_cast<StringType &>(str_caster).c_str());
+    }
+    explicit operator CharT &() {
         if (none)
             throw value_error("Cannot convert None to a character");
 
@@ -582,8 +599,8 @@ public:
 
     template <typename T> using cast_op_type = type;
 
-    operator type() & { return implicit_cast(indices{}); }
-    operator type() && { return std::move(*this).implicit_cast(indices{}); }
+    explicit operator type() & { return implicit_cast(indices{}); }
+    explicit operator type() && { return std::move(*this).implicit_cast(indices{}); }
 
 protected:
     template <size_t... Is>
@@ -610,6 +627,7 @@ protected:
     template <typename T, size_t... Is>
     static handle cast_impl(T &&src, return_value_policy policy, handle parent, index_sequence<Is...>) {
         PYBIND11_WORKAROUND_INCORRECT_MSVC_C4100(src, policy, parent);
+        PYBIND11_WORKAROUND_INCORRECT_GCC_UNUSED_BUT_SET_PARAMETER(policy, parent);
         std::array<object, size> entries{{
             reinterpret_steal<object>(make_caster<Ts>::cast(std::get<Is>(std::forward<T>(src)), policy, parent))...
         }};
@@ -1166,13 +1184,14 @@ public:
     }
 
     template <typename Return, typename Guard, typename Func>
+    // NOLINTNEXTLINE(readability-const-return-type)
     enable_if_t<!std::is_void<Return>::value, Return> call(Func &&f) && {
-        return std::move(*this).template call_impl<Return>(std::forward<Func>(f), indices{}, Guard{});
+        return std::move(*this).template call_impl<remove_cv_t<Return>>(std::forward<Func>(f), indices{}, Guard{});
     }
 
     template <typename Return, typename Guard, typename Func>
     enable_if_t<std::is_void<Return>::value, void_type> call(Func &&f) && {
-        std::move(*this).template call_impl<Return>(std::forward<Func>(f), indices{}, Guard{});
+        std::move(*this).template call_impl<remove_cv_t<Return>>(std::forward<Func>(f), indices{}, Guard{});
         return void_type();
     }
 
@@ -1236,8 +1255,8 @@ public:
         // Tuples aren't (easily) resizable so a list is needed for collection,
         // but the actual function call strictly requires a tuple.
         auto args_list = list();
-        int _[] = { 0, (process(args_list, std::forward<Ts>(values)), 0)... };
-        ignore_unused(_);
+        using expander = int[];
+        (void) expander{0, (process(args_list, std::forward<Ts>(values)), 0)...};
 
         m_args = std::move(args_list);
     }

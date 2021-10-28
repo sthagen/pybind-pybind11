@@ -13,6 +13,9 @@
 #include <pybind11/stl.h>
 
 #if defined(_MSC_VER)
+#if _MSC_VER < 1910  // VS 2015's MSVC
+#  pragma warning(disable: 4127) // C4127: conditional expression is constant
+#endif
 #  pragma warning(disable: 4996) // C4996: std::unary_negation is deprecated
 #endif
 
@@ -178,6 +181,7 @@ TEST_SUBMODULE(eigen, m) {
         ReturnTester() { print_created(this); }
         ~ReturnTester() { print_destroyed(this); }
         static Eigen::MatrixXd create() { return Eigen::MatrixXd::Ones(10, 10); }
+        // NOLINTNEXTLINE(readability-const-return-type)
         static const Eigen::MatrixXd createConst() { return Eigen::MatrixXd::Ones(10, 10); }
         Eigen::MatrixXd &get() { return mat; }
         Eigen::MatrixXd *getPtr() { return &mat; }
@@ -244,6 +248,9 @@ TEST_SUBMODULE(eigen, m) {
 
     // test_fixed, and various other tests
     m.def("fixed_r", [mat]() -> FixedMatrixR { return FixedMatrixR(mat); });
+    // Our Eigen does a hack which respects constness through the numpy writeable flag.
+    // Therefore, the const return actually affects this type despite being an rvalue.
+    // NOLINTNEXTLINE(readability-const-return-type)
     m.def("fixed_r_const", [mat]() -> const FixedMatrixR { return FixedMatrixR(mat); });
     m.def("fixed_c", [mat]() -> FixedMatrixC { return FixedMatrixC(mat); });
     m.def("fixed_copy_r", [](const FixedMatrixR &m) -> FixedMatrixR { return m; });
