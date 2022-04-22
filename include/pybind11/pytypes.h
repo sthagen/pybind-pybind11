@@ -268,10 +268,7 @@ public:
     /// Copy constructor; always increases the reference count
     object(const object &o) : handle(o) { inc_ref(); }
     /// Move constructor; steals the object from ``other`` and preserves its reference count
-    object(object &&other) noexcept {
-        m_ptr = other.m_ptr;
-        other.m_ptr = nullptr;
-    }
+    object(object &&other) noexcept : handle(other) { other.m_ptr = nullptr; }
     /// Destructor; automatically calls `handle::dec_ref()`
     ~object() { dec_ref(); }
 
@@ -603,13 +600,13 @@ inline handle get_function(handle value) {
 inline PyObject *dict_getitemstring(PyObject *v, const char *key) {
     PyObject *kv = nullptr, *rv = nullptr;
     kv = PyUnicode_FromString(key);
-    if (kv == NULL) {
+    if (kv == nullptr) {
         throw error_already_set();
     }
 
     rv = PyDict_GetItemWithError(v, kv);
     Py_DECREF(kv);
-    if (rv == NULL && PyErr_Occurred()) {
+    if (rv == nullptr && PyErr_Occurred()) {
         throw error_already_set();
     }
     return rv;
@@ -617,7 +614,7 @@ inline PyObject *dict_getitemstring(PyObject *v, const char *key) {
 
 inline PyObject *dict_getitem(PyObject *v, PyObject *key) {
     PyObject *rv = PyDict_GetItemWithError(v, key);
-    if (rv == NULL && PyErr_Occurred()) {
+    if (rv == nullptr && PyErr_Occurred()) {
         throw error_already_set();
     }
     return rv;
@@ -1519,8 +1516,8 @@ private:
 class slice : public object {
 public:
     PYBIND11_OBJECT_DEFAULT(slice, object, PySlice_Check)
-    slice(handle start, handle stop, handle step) {
-        m_ptr = PySlice_New(start.ptr(), stop.ptr(), step.ptr());
+    slice(handle start, handle stop, handle step)
+        : object(PySlice_New(start.ptr(), stop.ptr(), step.ptr()), stolen_t{}) {
         if (!m_ptr) {
             pybind11_fail("Could not allocate slice object!");
         }
@@ -1591,7 +1588,8 @@ public:
                 }
                 pybind11_fail("Unable to get capsule context");
             }
-            void *ptr = PyCapsule_GetPointer(o, nullptr);
+            const char *name = get_name_in_error_scope(o);
+            void *ptr = PyCapsule_GetPointer(o, name);
             if (ptr == nullptr) {
                 throw error_already_set();
             }
@@ -1605,7 +1603,8 @@ public:
 
     explicit capsule(void (*destructor)()) {
         m_ptr = PyCapsule_New(reinterpret_cast<void *>(destructor), nullptr, [](PyObject *o) {
-            auto destructor = reinterpret_cast<void (*)()>(PyCapsule_GetPointer(o, nullptr));
+            const char *name = get_name_in_error_scope(o);
+            auto destructor = reinterpret_cast<void (*)()>(PyCapsule_GetPointer(o, name));
             if (destructor == nullptr) {
                 throw error_already_set();
             }
@@ -1640,7 +1639,33 @@ public:
         }
     }
 
-    const char *name() const { return PyCapsule_GetName(m_ptr); }
+    const char *name() const {
+        const char *name = PyCapsule_GetName(m_ptr);
+        if ((name == nullptr) && PyErr_Occurred()) {
+            throw error_already_set();
+        }
+        return name;
+    }
+
+    /// Replaces a capsule's name *without* calling the destructor on the existing one.
+    void set_name(const char *new_name) {
+        if (PyCapsule_SetName(m_ptr, new_name) != 0) {
+            throw error_already_set();
+        }
+    }
+
+private:
+    static const char *get_name_in_error_scope(PyObject *o) {
+        error_scope error_guard;
+
+        const char *name = PyCapsule_GetName(o);
+        if ((name == nullptr) && PyErr_Occurred()) {
+            // write out and consume error raised by call to PyCapsule_GetName
+            PyErr_WriteUnraisable(o);
+        }
+
+        return name;
+    }
 };
 
 class tuple : public object {
@@ -1889,8 +1914,8 @@ public:
         return memoryview::from_buffer(reinterpret_cast<void *>(ptr),
                                        sizeof(T),
                                        format_descriptor<T>::value,
-                                       shape,
-                                       strides,
+                                       std::move(shape),
+                                       std::move(strides),
                                        readonly);
     }
 
@@ -1898,7 +1923,8 @@ public:
     static memoryview from_buffer(const T *ptr,
                                   detail::any_container<ssize_t> shape,
                                   detail::any_container<ssize_t> strides) {
-        return memoryview::from_buffer(const_cast<T *>(ptr), shape, strides, true);
+        return memoryview::from_buffer(
+            const_cast<T *>(ptr), std::move(shape), std::move(strides), true);
     }
 
     /** \rst
