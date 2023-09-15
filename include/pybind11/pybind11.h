@@ -57,11 +57,13 @@ inline std::string replace_newlines_and_squash(const char *text) {
     std::string result(text);
     bool previous_is_whitespace = false;
 
-    // Do not modify string representations
-    char first_char = result[0];
-    char last_char = result[result.size() - 1];
-    if (first_char == last_char && first_char == '\'') {
-        return result;
+    if (result.size() >= 2) {
+        // Do not modify string representations
+        char first_char = result[0];
+        char last_char = result[result.size() - 1];
+        if (first_char == last_char && first_char == '\'') {
+            return result;
+        }
     }
     result.clear();
 
@@ -2434,7 +2436,7 @@ iterator make_iterator_impl(Iterator first, Sentinel last, Extra &&...extra) {
                 Policy);
     }
 
-    return cast(state{first, last, true});
+    return cast(state{std::forward<Iterator>(first), std::forward<Sentinel>(last), true});
 }
 
 PYBIND11_NAMESPACE_END(detail)
@@ -2451,7 +2453,9 @@ iterator make_iterator(Iterator first, Sentinel last, Extra &&...extra) {
                                       Iterator,
                                       Sentinel,
                                       ValueType,
-                                      Extra...>(first, last, std::forward<Extra>(extra)...);
+                                      Extra...>(std::forward<Iterator>(first),
+                                                std::forward<Sentinel>(last),
+                                                std::forward<Extra>(extra)...);
 }
 
 /// Makes a python iterator over the keys (`.first`) of a iterator over pairs from a
@@ -2467,7 +2471,9 @@ iterator make_key_iterator(Iterator first, Sentinel last, Extra &&...extra) {
                                       Iterator,
                                       Sentinel,
                                       KeyType,
-                                      Extra...>(first, last, std::forward<Extra>(extra)...);
+                                      Extra...>(std::forward<Iterator>(first),
+                                                std::forward<Sentinel>(last),
+                                                std::forward<Extra>(extra)...);
 }
 
 /// Makes a python iterator over the values (`.second`) of a iterator over pairs from a
@@ -2483,7 +2489,9 @@ iterator make_value_iterator(Iterator first, Sentinel last, Extra &&...extra) {
                                       Iterator,
                                       Sentinel,
                                       ValueType,
-                                      Extra...>(first, last, std::forward<Extra>(extra)...);
+                                      Extra...>(std::forward<Iterator>(first),
+                                                std::forward<Sentinel>(last),
+                                                std::forward<Extra>(extra)...);
 }
 
 /// Makes an iterator over values of an stl container or other container supporting
