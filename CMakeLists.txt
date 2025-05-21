@@ -179,7 +179,6 @@ if(PYBIND11_MASTER_PROJECT)
   endif()
 endif()
 
-# NB: when adding a header don't forget to also add it to setup.py
 set(PYBIND11_HEADERS
     include/pybind11/detail/class.h
     include/pybind11/detail/common.h
@@ -223,6 +222,7 @@ set(PYBIND11_HEADERS
     include/pybind11/operators.h
     include/pybind11/pybind11.h
     include/pybind11/pytypes.h
+    include/pybind11/subinterpreter.h
     include/pybind11/stl.h
     include/pybind11/stl_bind.h
     include/pybind11/stl/filesystem.h
