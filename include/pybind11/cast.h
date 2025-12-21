@@ -394,7 +394,8 @@ public:
         }
 
         /* Check if this is a C++ type */
-        const auto &bases = all_type_info((PyTypeObject *) type::handle_of(h).ptr());
+        const auto &bases
+            = all_type_info(reinterpret_cast<PyTypeObject *>(type::handle_of(h).ptr()));
         if (bases.size() == 1) { // Only allowing loading from a single-value type
             value = values_and_holders(reinterpret_cast<instance *>(h.ptr())).begin()->value_ptr();
             return true;
@@ -475,7 +476,7 @@ public:
 
 private:
     // Test if an object is a NumPy boolean (without fetching the type).
-    static inline bool is_numpy_bool(handle object) {
+    static bool is_numpy_bool(handle object) {
         const char *type_name = Py_TYPE(object.ptr())->tp_name;
         // Name changed to `numpy.bool` in NumPy 2, `numpy.bool_` is needed for 1.x support
         return std::strcmp("numpy.bool", type_name) == 0
@@ -541,7 +542,7 @@ struct string_caster {
 
         const auto *buffer
             = reinterpret_cast<const CharT *>(PYBIND11_BYTES_AS_STRING(utfNbytes.ptr()));
-        size_t length = (size_t) PYBIND11_BYTES_SIZE(utfNbytes.ptr()) / sizeof(CharT);
+        size_t length = static_cast<size_t>(PYBIND11_BYTES_SIZE(utfNbytes.ptr())) / sizeof(CharT);
         // Skip BOM for UTF-16/32
         if (UTF_N > 8) {
             buffer++;
