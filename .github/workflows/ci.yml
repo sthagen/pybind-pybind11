@@ -88,7 +88,7 @@ jobs:
             cmake-args: -DCMAKE_CXX_STANDARD=20 -DPYBIND11_DISABLE_HANDLE_TYPE_NAME_DEFAULT_IMPLEMENTATION=ON
           - runs-on: ubuntu-latest
             python-version: '3.14'
-            cmake-args: -DCMAKE_CXX_STANDARD=14 -DCMAKE_CXX_FLAGS="-DPYBIND11_HAS_SUBINTERPRETER_SUPPORT=0"
+            cmake-args: -DCMAKE_CXX_STANDARD=14
           - runs-on: ubuntu-latest
             python-version: 'pypy-3.10'
             cmake-args: -DCMAKE_CXX_STANDARD=14
@@ -229,6 +229,7 @@ jobs:
       run: cmake --build . --target pytest
 
     - name: Compiled tests
+      timeout-minutes: 3
       run: cmake --build . --target cpptest
 
     - name: Interface test
@@ -296,7 +297,7 @@ jobs:
 
     - name: Valgrind cache
       if: matrix.valgrind
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       id: cache-valgrind
       with:
         path: valgrind
@@ -334,6 +335,7 @@ jobs:
       run: cmake --build --preset default --target pytest
 
     - name: C++ tests
+      timeout-minutes: 3
       run: cmake --build --preset default --target cpptest
 
     - name: Visibility test
@@ -393,6 +395,7 @@ jobs:
       run: cmake --build build --target pytest
 
     - name: C++ tests
+      timeout-minutes: 3
       run: cmake --build build --target cpptest
 
     - name: Interface test
@@ -516,6 +519,7 @@ jobs:
       run: cmake --build build --target pytest
 
     - name: C++ tests
+      timeout-minutes: 3
       run: cmake --build build --target cpptest
 
     - name: Interface test
@@ -570,6 +574,7 @@ jobs:
       run: cmake --build build --target pytest
 
     - name: C++ tests
+      timeout-minutes: 3
       run: cmake --build build --target cpptest
 
     - name: Interface test
@@ -652,6 +657,7 @@ jobs:
         cmake --build build-11 --target check
 
     - name: C++ tests C++11
+      timeout-minutes: 3
       run: |
         set +e; source /opt/intel/oneapi/setvars.sh; set -e
         cmake --build build-11 --target cpptest
@@ -689,6 +695,7 @@ jobs:
         cmake --build build-17 --target check
 
     - name: C++ tests C++17
+      timeout-minutes: 3
       run: |
         set +e; source /opt/intel/oneapi/setvars.sh; set -e
         cmake --build build-17 --target cpptest
@@ -760,6 +767,7 @@ jobs:
       run: cmake --build build --target pytest
 
     - name: C++ tests
+      timeout-minutes: 3
       run: cmake --build build --target cpptest
 
     - name: Interface test
@@ -778,7 +786,8 @@ jobs:
     timeout-minutes: 90
 
     steps:
-    - uses: actions/checkout@v1  # v1 is required to run inside docker
+    # v1 required for i386/debian container; pinned to SHA to prevent dependabot updates
+    - uses: actions/checkout@544eadc6bf3d226fd7a7a9f0dc5b5bf7ca0675b9  # v1
 
     - name: Install requirements
       run: |
@@ -1000,6 +1009,7 @@ jobs:
       run: cmake --build build --target pytest
 
     - name: C++20 tests
+      timeout-minutes: 3
       run: cmake --build build --target cpptest -j 2
 
     - name: Interface test C++20
@@ -1076,6 +1086,7 @@ jobs:
       run: cmake --build build --target pytest -j 2
 
     - name: C++11 tests
+      timeout-minutes: 3
       run: PYTHONHOME=/${{matrix.sys}} PYTHONPATH=/${{matrix.sys}} cmake --build build --target cpptest -j 2
 
     - name: Interface test C++11
@@ -1100,6 +1111,7 @@ jobs:
       run: cmake --build build2 --target pytest -j 2
 
     - name: C++14 tests
+      timeout-minutes: 3
       run: PYTHONHOME=/${{matrix.sys}} PYTHONPATH=/${{matrix.sys}} cmake --build build2 --target cpptest -j 2
 
     - name: Interface test C++14
@@ -1124,6 +1136,7 @@ jobs:
       run: cmake --build build3 --target pytest -j 2
 
     - name: C++17 tests
+      timeout-minutes: 3
       run: PYTHONHOME=/${{matrix.sys}} PYTHONPATH=/${{matrix.sys}} cmake --build build3 --target cpptest -j 2
 
     - name: Interface test C++17
@@ -1195,6 +1208,7 @@ jobs:
         run: cmake --build . --target pytest -j 2
 
       - name: C++ tests
+        timeout-minutes: 3
         run: cmake --build . --target cpptest -j 2
 
       - name: Interface test
@@ -1257,6 +1271,7 @@ jobs:
         run: cmake --build . --target pytest -j 2
 
       - name: C++ tests
+        timeout-minutes: 3
         run: cmake --build . --target cpptest -j 2
 
       - name: Interface test
@@ -1329,6 +1344,7 @@ jobs:
       run: cmake --build build --target pytest -j 2
 
     - name: C++ tests
+      timeout-minutes: 3
       run: PYTHONHOME=/clangarm64 PYTHONPATH=/clangarm64 cmake --build build --target cpptest -j 2
 
     - name: Interface test
