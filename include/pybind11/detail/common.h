@@ -606,15 +606,6 @@ enum class return_value_policy : uint8_t {
 
 PYBIND11_NAMESPACE_BEGIN(detail)
 
-// Py_IsFinalizing() is a public API since 3.13; before that use _Py_IsFinalizing().
-inline bool py_is_finalizing() {
-#if PY_VERSION_HEX >= 0x030D0000
-    return Py_IsFinalizing() != 0;
-#else
-    return _Py_IsFinalizing() != 0;
-#endif
-}
-
 static constexpr int log2(size_t n, int k = 0) { return (n <= 1) ? k : log2(n >> 1, k + 1); }
 
 // Returns the size as a multiple of sizeof(void *), rounded up.
@@ -1047,6 +1038,17 @@ struct is_instantiation<Class, Class<Us...>> : std::true_type {};
 /// Check if T is std::shared_ptr<U> where U can be anything
 template <typename T>
 using is_shared_ptr = is_instantiation<std::shared_ptr, T>;
+
+/// Detects whether static_cast<Derived*>(Base*) is valid, i.e. the inheritance is non-virtual.
+/// Used to detect virtual bases: if this is false, pointer adjustments require the implicit_casts
+/// chain rather than reinterpret_cast.
+template <typename Base, typename Derived, typename = void>
+struct is_static_downcastable : std::false_type {};
+template <typename Base, typename Derived>
+struct is_static_downcastable<Base,
+                              Derived,
+                              void_t<decltype(static_cast<Derived *>(std::declval<Base *>()))>>
+    : std::true_type {};
 
 /// Check if T looks like an input iterator
 template <typename T, typename = void>
