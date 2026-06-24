@@ -507,12 +507,11 @@ struct string_caster {
     static constexpr size_t UTF_N = 8 * sizeof(CharT);
 
     bool load(handle src, bool) {
-        handle load_src = src;
         if (!src) {
             return false;
         }
-        if (!PyUnicode_Check(load_src.ptr())) {
-            return load_raw(load_src);
+        if (!PyUnicode_Check(src.ptr())) {
+            return load_raw(src);
         }
 
         // For UTF-8 we avoid the need for a temporary `bytes` object by using
@@ -520,17 +519,20 @@ struct string_caster {
         if (UTF_N == 8) {
             Py_ssize_t size = -1;
             const auto *buffer
-                = reinterpret_cast<const CharT *>(PyUnicode_AsUTF8AndSize(load_src.ptr(), &size));
+                = reinterpret_cast<const CharT *>(PyUnicode_AsUTF8AndSize(src.ptr(), &size));
             if (!buffer) {
                 PyErr_Clear();
                 return false;
             }
             value = StringType(buffer, static_cast<size_t>(size));
+            if (IsView) {
+                loader_life_support::add_patient(src);
+            }
             return true;
         }
 
         auto utfNbytes
-            = reinterpret_steal<object>(PyUnicode_AsEncodedString(load_src.ptr(),
+            = reinterpret_steal<object>(PyUnicode_AsEncodedString(src.ptr(),
                                                                   UTF_N == 8    ? "utf-8"
                                                                   : UTF_N == 16 ? "utf-16"
                                                                                 : "utf-32",
@@ -603,6 +605,9 @@ private:
                 pybind11_fail("Unexpected PYBIND11_BYTES_AS_STRING() failure.");
             }
             value = StringType(bytes, (size_t) PYBIND11_BYTES_SIZE(src.ptr()));
+            if (IsView) {
+                loader_life_support::add_patient(src);
+            }
             return true;
         }
         if (PyByteArray_Check(src.ptr())) {
@@ -613,6 +618,9 @@ private:
                 pybind11_fail("Unexpected PyByteArray_AsString() failure.");
             }
             value = StringType(bytearray, (size_t) PyByteArray_Size(src.ptr()));
+            if (IsView) {
+                loader_life_support::add_patient(src);
+            }
             return true;
         }
 
