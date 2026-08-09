@@ -1461,12 +1461,23 @@ PYBIND11_NAMESPACE_END(detail)
 // Use to activate Py_MOD_GIL_NOT_USED.
 class mod_gil_not_used {
 public:
-    explicit mod_gil_not_used(bool flag = true) : flag_(flag) {}
+    mod_gil_not_used() : flag_(true) {}
+    PYBIND11_DEPRECATED("use py::mod_gil_not_used() or py::mod_gil_used() instead")
+    explicit mod_gil_not_used(bool flag) : flag_(flag) {}
     bool flag() const { return flag_; }
+
+    friend mod_gil_not_used mod_gil_used();
 
 private:
     bool flag_;
 };
+
+// Use to activate Py_MOD_GIL_USED, the current default.
+inline mod_gil_not_used mod_gil_used() {
+    mod_gil_not_used tag;
+    tag.flag_ = false;
+    return tag;
+}
 
 class multiple_interpreters {
 public:
@@ -1735,8 +1746,7 @@ public:
     static module_ create_extension_module(const char *name,
                                            const char *doc,
                                            PyModuleDef *def,
-                                           mod_gil_not_used gil_not_used
-                                           = mod_gil_not_used(false)) {
+                                           mod_gil_not_used gil_not_used = mod_gil_used()) {
         // Placement new (not an allocation).
         new (def) PyModuleDef{/* m_base */ PyModuleDef_HEAD_INIT,
                               /* m_name */ name,
@@ -1958,7 +1968,7 @@ void call_operator_delete(T *p, size_t s, size_t) {
 inline void call_operator_delete(void *p, size_t s, size_t a) {
     (void) s;
     (void) a;
-#if defined(__cpp_aligned_new) && (!defined(_MSC_VER) || _MSC_VER >= 1912)
+#if defined(__cpp_aligned_new)
     if (a > __STDCPP_DEFAULT_NEW_ALIGNMENT__) {
 #    ifdef __cpp_sized_deallocation
         ::operator delete(p, s, std::align_val_t(a));
@@ -3754,34 +3764,20 @@ register_local_exception(handle scope, const char *name, handle base = PyExc_Exc
 
 PYBIND11_NAMESPACE_BEGIN(detail)
 PYBIND11_NOINLINE void print(const tuple &args, const dict &kwargs) {
-    auto strings = tuple(args.size());
-    for (size_t i = 0; i < args.size(); ++i) {
-        strings[i] = str(args[i]);
+#if PY_VERSION_HEX >= 0x030D0000
+    auto builtins = reinterpret_steal<dict>(PyEval_GetFrameBuiltins());
+#else
+    auto builtins = reinterpret_borrow<dict>(PyEval_GetBuiltins());
+#endif
+    // The builtins dictionary may already be partially cleared during interpreter shutdown.
+    auto native_print = reinterpret_steal<object>(dict_getitemstringref(builtins.ptr(), "print"));
+    if (!native_print) {
+        return;
     }
-    auto sep = kwargs.contains("sep") ? kwargs["sep"] : str(" ");
-    auto line = sep.attr("join")(std::move(strings));
-
-    object file;
-    if (kwargs.contains("file")) {
-        file = kwargs["file"].cast<object>();
-    } else {
-        try {
-            file = module_::import("sys").attr("stdout");
-        } catch (const error_already_set &) {
-            /* If print() is called from code that is executed as
-               part of garbage collection during interpreter shutdown,
-               importing 'sys' can fail. Give up rather than crashing the
-               interpreter in this case. */
-            return;
-        }
-    }
-
-    auto write = file.attr("write");
-    write(std::move(line));
-    write(kwargs.contains("end") ? kwargs["end"] : str("\n"));
-
-    if (kwargs.contains("flush") && kwargs["flush"].cast<bool>()) {
-        file.attr("flush")();
+    auto result
+        = reinterpret_steal<object>(PyObject_Call(native_print.ptr(), args.ptr(), kwargs.ptr()));
+    if (!result) {
+        throw error_already_set();
     }
 }
 PYBIND11_NAMESPACE_END(detail)
@@ -3837,24 +3833,23 @@ get_type_override(const void *this_ptr, const type_info *this_type, const char *
     /* Don't call dispatch code if invoked from overridden function.
        Unfortunately this doesn't work on PyPy and GraalPy. */
 #if !defined(PYPY_VERSION) && !defined(GRAALVM_PYTHON)
-#    if PY_VERSION_HEX >= 0x03090000
     PyFrameObject *frame = PyThreadState_GetFrame(PyThreadState_Get());
     if (frame != nullptr) {
         PyCodeObject *f_code = PyFrame_GetCode(frame);
         // f_code is guaranteed to not be NULL
         if (std::string(str(f_code->co_name)) == name && f_code->co_argcount > 0) {
-#        if PY_VERSION_HEX >= 0x030d0000
+#    if PY_VERSION_HEX >= 0x030d0000
             PyObject *locals = PyEval_GetFrameLocals();
-#        else
+#    else
             PyObject *locals = PyEval_GetLocals();
             Py_XINCREF(locals);
-#        endif
+#    endif
             if (locals != nullptr) {
-#        if PY_VERSION_HEX >= 0x030b0000
+#    if PY_VERSION_HEX >= 0x030b0000
                 PyObject *co_varnames = PyCode_GetVarnames(f_code);
-#        else
+#    else
                 PyObject *co_varnames = PyObject_GetAttrString((PyObject *) f_code, "co_varnames");
-#        endif
+#    endif
                 PyObject *self_arg = PyTuple_GET_ITEM(co_varnames, 0);
                 Py_DECREF(co_varnames);
                 PyObject *self_caller = dict_getitem(locals, self_arg);
@@ -3869,18 +3864,6 @@ get_type_override(const void *this_ptr, const type_info *this_type, const char *
         Py_DECREF(f_code);
         Py_DECREF(frame);
     }
-#    else
-    PyFrameObject *frame = PyThreadState_Get()->frame;
-    if (frame != nullptr && (std::string) str(frame->f_code->co_name) == name
-        && frame->f_code->co_argcount > 0) {
-        PyFrame_FastToLocals(frame);
-        PyObject *self_caller
-            = dict_getitem(frame->f_locals, PyTuple_GET_ITEM(frame->f_code->co_varnames, 0));
-        if (self_caller == self.ptr()) {
-            return function();
-        }
-    }
-#    endif
 
 #else
     /* PyPy currently doesn't provide a detailed cpyext emulation of

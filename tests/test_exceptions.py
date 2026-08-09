@@ -94,14 +94,16 @@ def test_python_call_in_catch():
 
 def ignore_pytest_unraisable_warning(f):
     unraisable = "PytestUnraisableExceptionWarning"
-    if hasattr(pytest, unraisable):  # Python >= 3.8 and pytest >= 6
+    if hasattr(pytest, unraisable):  # pytest >= 6
         dec = pytest.mark.filterwarnings(f"ignore::pytest.{unraisable}")
         return dec(f)
     return f
 
 
 # TODO: find out why this fails on PyPy, https://foss.heptapod.net/pypy/pypy/-/issues/3583
-@pytest.mark.xfail(env.PYPY, reason="Failure on PyPy 3.8 (7.3.7)", strict=False)
+@pytest.mark.xfail(
+    env.PYPY, reason="Failure on PyPy (still fails with 7.3.23)", strict=False
+)
 @ignore_pytest_unraisable_warning
 def test_python_alreadyset_in_destructor(monkeypatch, capsys):
     triggered = False
@@ -110,7 +112,7 @@ def test_python_alreadyset_in_destructor(monkeypatch, capsys):
     default_hook = sys.__unraisablehook__
 
     def hook(unraisable_hook_args):
-        exc_type, exc_value, exc_tb, err_msg, obj = unraisable_hook_args
+        _exc_type, _exc_value, _exc_tb, _err_msg, obj = unraisable_hook_args
         if obj == "already_set demo":
             nonlocal triggered
             triggered = True
@@ -342,8 +344,10 @@ def _test_flaky_exception_failure_point_init_before_py_3_12():
     lines = str(excinfo.value).splitlines()
     # PyErr_NormalizeException replaces the original FlakyException with ValueError:
     assert lines[:3] == [
-        "pybind11::error_already_set: MISMATCH of original and normalized active exception types:"
-        " ORIGINAL FlakyException REPLACED BY ValueError: triggered_failure_point_init",
+        (
+            "pybind11::error_already_set: MISMATCH of original and normalized active exception types:"
+            " ORIGINAL FlakyException REPLACED BY ValueError: triggered_failure_point_init"
+        ),
         "",
         "At:",
     ]
