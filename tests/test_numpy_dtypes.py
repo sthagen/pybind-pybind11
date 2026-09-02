@@ -205,6 +205,24 @@ def test_dtype(simple_dtype):
     assert (m.test_dtype_switch(arr.astype("longdouble")) == arr + 1).all()
 
 
+def test_half_dtype():
+    assert m.half_dtype_num() == np.dtype("float16").num
+
+    result = m.half_roundtrip(np.array([1.5, 2.25, -3.0], dtype=np.float16))
+    assert result.dtype == np.float16
+
+
+def test_templated_dtype():
+    """A type spelled with a comma needs PYBIND11_TYPE here."""
+    plain, renamed = m.templated_dtypes()
+    assert plain == np.dtype([("a", "i4"), ("b", "f4")])
+    assert renamed == np.dtype([("x", "i2"), ("y", "u2")])
+
+
+def test_direct_field_descriptor():
+    assert m.direct_field_descriptors() == ["uint_", "flt", "b"]
+
+
 def test_recarray(simple_dtype, packed_dtype):
     elements = [(False, 0, 0.0, -0.0), (True, 1, 1.5, -2.5), (False, 2, 3.0, -5.0)]
 
