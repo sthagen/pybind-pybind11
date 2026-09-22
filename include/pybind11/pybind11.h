@@ -1001,6 +1001,25 @@ protected:
             }
         }
 
+        // While a constructor chain containing an old-style placement-new
+        // `__init__`/`__setstate__` runs, `type_caster_generic::load_value()` is permitted to
+        // lazily allocate storage for the C++ value that the constructor is about to construct
+        // into. New-style constructors never load `self` through a type caster (it is injected
+        // directly below), so the scope stays disarmed for chains that contain only new-style
+        // constructors and loading a not-yet-constructed instance remains an error even while they
+        // run. The scope also frees storage that was lazily allocated by a constructor call that
+        // then failed.
+        detail::value_and_holder *lazily_allocatable_v_h = nullptr;
+        if (overloads->is_constructor) {
+            for (const function_record *fr = overloads; fr != nullptr; fr = fr->next) {
+                if (!fr->is_new_style_constructor) {
+                    lazily_allocatable_v_h = &self_value_and_holder;
+                    break;
+                }
+            }
+        }
+        detail::old_style_init_scope old_style_init_guard(lazily_allocatable_v_h);
+
         try {
             // We do this in two passes: in the first pass, we load arguments with `convert=false`;
             // in the second, we allow conversion (except for arguments with an explicit
@@ -1932,8 +1951,7 @@ protected:
 };
 
 /// Set the pointer to operator new if it exists. The cast is needed because it can be overloaded.
-template <typename T,
-          typename = void_t<decltype(static_cast<void *(*) (size_t)>(T::operator new))>>
+template <typename T, typename = void_t<decltype(static_cast<void *(*)(size_t)>(T::operator new))>>
 void set_operator_new(type_record *r) {
     r->operator_new = &T::operator new;
 }
@@ -2800,6 +2818,16 @@ private:
     template <typename H = holder_type,
               detail::enable_if_t<!detail::is_smart_holder<H>::value, int> = 0>
     static void init_instance(detail::instance *inst, const void *holder_ptr) {
+        // A factory-based `py::init` keeps the `py::call_guard<py::gil_scoped_release>`
+        // alive across the `construct()` call that invokes this function, so
+        // `init_instance` may run with the GIL released. Acquire it (a no-op if it is
+        // already held) so that `register_instance` and `init_holder` only touch
+        // `internals.registered_instances` while the GIL is held.
+        //
+        // On free-threaded builds `gil_scoped_release` detaches the thread state instead:
+        // `gil_scoped_acquire` attaches it again without taking a global lock, as required
+        // by the critical section inside `get_type_info`.
+        gil_scoped_acquire gil;
         auto v_h = inst->get_value_and_holder(detail::get_type_info(typeid(type)));
         if (!v_h.instance_registered()) {
             register_instance(inst, v_h.value_ptr(), v_h.type);
@@ -2839,6 +2867,9 @@ private:
         // Need for const_cast is a consequence of the type_info::init_instance type:
         // void (*init_instance)(instance *, const void *);
         auto *holder_void_ptr = const_cast<void *>(holder_const_void_ptr);
+
+        // See the comment in the non-smart_holder `init_instance` above.
+        gil_scoped_acquire gil;
 
         auto v_h = inst->get_value_and_holder(detail::get_type_info(typeid(type)));
         if (!v_h.instance_registered()) {

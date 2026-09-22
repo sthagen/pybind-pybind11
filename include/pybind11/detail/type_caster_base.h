@@ -525,6 +525,7 @@ PYBIND11_NOINLINE void instance::allocate_layout() {
             = reinterpret_cast<std::uint8_t *>(&nonsimple.values_and_holders[flags_at]);
     }
     owned = true;
+    old_style_init_active = false;
 }
 
 // NOLINTNEXTLINE(readability-make-member-function-const)
@@ -533,6 +534,55 @@ PYBIND11_NOINLINE void instance::deallocate_layout() {
         PyMem_Free(reinterpret_cast<void *>(nonsimple.values_and_holders));
     }
 }
+
+/// RAII helper preserving lazy value allocation for a constructor chain containing a deprecated
+/// old-style placement-new `__init__`/`__setstate__`. Passing `nullptr` makes this a no-op. The
+/// compatibility window covers the whole chain and all value slots in the Python instance; it does
+/// not attempt to distinguish the old-style `self` load from reentrant, later-argument,
+/// cross-base, nested, or concurrent loads. Nesting restores the previous state but is not made
+/// safe by this scope.
+/// Before narrowing this window, review `old_style_placement_new` in `docs/upgrade.rst` and its
+/// reference from `docs/advanced/classes.rst`: the broad scope preserves historical behavior,
+/// with documented reentrancy, multiple-inheritance, nesting, and concurrency limitations.
+///
+/// When the scope exits, the destructor frees storage that was lazily allocated in any value slot
+/// that was empty on entry and whose holder was never constructed. This keeps the uninitialized-
+/// value guard in `load_value()` effective for later uses of the instance, including sibling slots
+/// in a Python multiple-inheritance layout.
+class old_style_init_scope {
+public:
+    explicit old_style_init_scope(value_and_holder *v_h)
+        : inst_{v_h != nullptr ? v_h->inst : nullptr} {
+        if (inst_ != nullptr) {
+            values_and_holders vhs(inst_);
+            empty_slots_.reserve(vhs.size());
+            for (auto &slot : vhs) {
+                if (slot.value_ptr() == nullptr) {
+                    empty_slots_.push_back(slot);
+                }
+            }
+            was_active_ = inst_->old_style_init_active;
+            inst_->old_style_init_active = true;
+        }
+    }
+    ~old_style_init_scope() {
+        if (inst_ != nullptr) {
+            inst_->old_style_init_active = was_active_;
+            for (auto &slot : empty_slots_) {
+                if (!slot.holder_constructed() && slot.value_ptr() != nullptr) {
+                    slot.type->dealloc(slot); // Frees the storage and nulls the value pointer.
+                }
+            }
+        }
+    }
+    old_style_init_scope(const old_style_init_scope &) = delete;
+    old_style_init_scope &operator=(const old_style_init_scope &) = delete;
+
+private:
+    instance *inst_;
+    std::vector<value_and_holder> empty_slots_;
+    bool was_active_ = false;
+};
 
 PYBIND11_NOINLINE bool isinstance_generic(handle obj, const std::type_info &tp) {
     handle type = detail::get_type_handle(tp, false);
@@ -1140,6 +1190,20 @@ public:
         auto *&vptr = v_h.value_ptr();
         // Lazy allocation for unallocated values:
         if (vptr == nullptr) {
+            // Lazy allocation exists only to support the deprecated old-style placement-new
+            // `__init__`/`__setstate__` idiom, which is handed a reference to uninitialized
+            // storage and constructs the C++ value into it. In any other context a null value
+            // pointer means the C++ object was never constructed -- e.g. the instance was created
+            // with `__new__()`, bypassing `__init__()` -- and handing out a pointer to
+            // uninitialized memory from here is undefined behavior (typically a segfault on the
+            // first virtual call). Fail loudly instead.
+            if (!v_h.inst->old_style_init_active) {
+                throw value_error("Missing value for wrapped C++ type `"
+                                  + clean_type_id(cpptype->name())
+                                  + "`: Python instance is uninitialized: the C++ object was "
+                                    "never constructed (`__init__()` was bypassed, e.g. by "
+                                    "calling `__new__()` directly).");
+            }
             const auto *type = v_h.type ? v_h.type : typeinfo;
             if (type->operator_new) {
                 vptr = type->operator_new(type->type_size);
@@ -1694,7 +1758,7 @@ public:
     }
 
 protected:
-    using Constructor = void *(*) (const void *);
+    using Constructor = void *(*)(const void *);
 
     /* Only enabled when the types are {copy,move}-constructible *and* when the type
        does not have a private operator new implementation. A comma operator is used in the
